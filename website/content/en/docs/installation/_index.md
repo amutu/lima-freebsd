@@ -5,12 +5,14 @@ weight: 1
 Supported host OS:
 - macOS (the latest version is recommended)
 - Linux
+- FreeBSD
 - NetBSD (untested)
 - DragonFlyBSD (untested)
 - Windows (untested)
 
 Prerequisite:
 - QEMU (Required, only if [QEMU]({{< ref "/docs/config/vmtype#qemu" >}}) driver is used)
+- bhyve (Required, only if [bhyve]({{< ref "/docs/config/vmtype#bhyve" >}}) driver is used; part of the FreeBSD base system, plus `libslirp` for networking)
 
 {{< tabpane text=true >}}
 

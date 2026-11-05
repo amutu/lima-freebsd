@@ -253,6 +253,14 @@ func validateMountType(cfg *limatype.LimaYAML) error {
 			default:
 				return fmt.Errorf("field `mountType` must be %#q for QEMU driver on Windows, got %#q", limatype.REVSSHFS, *cfg.MountType)
 			}
+		case "freebsd":
+			// QEMU on FreeBSD is built without virtfs support, see fillConfig().
+			switch *cfg.MountType {
+			case limatype.REVSSHFS:
+				return nil
+			default:
+				return fmt.Errorf("field `mountType` must be %#q for QEMU driver on FreeBSD, got %#q", limatype.REVSSHFS, *cfg.MountType)
+			}
 		default:
 			switch *cfg.MountType {
 			case limatype.REVSSHFS, limatype.NINEP:
@@ -318,6 +326,15 @@ func fillConfig(cfg *limatype.LimaYAML, instDir string) error {
 		mountTypesUnsupported[limatype.NINEP] = struct{}{}
 	}
 
+	if runtime.GOOS == "freebsd" {
+		// QEMU's -virtfs (9p) can only be enabled when the host is Linux or macOS;
+		// the FreeBSD build fails with:
+		//   ERROR: Feature virtfs cannot be enabled: virtio-9p (virtfs) requires Linux or macOS
+		// virtiofs is likewise unavailable (it needs virtiofsd + vhost-user, Linux-only).
+		mountTypesUnsupported[limatype.NINEP] = struct{}{}
+		mountTypesUnsupported[limatype.VIRTIOFS] = struct{}{}
+	}
+
 	if cfg.MountType == nil || *cfg.MountType == "" || *cfg.MountType == "default" {
 		cfg.MountType = new(limatype.NINEP)
 		if _, ok := mountTypesUnsupported[limatype.NINEP]; ok {
@@ -367,6 +384,10 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
 	if l.Instance.Config.SSH.OverVsock != nil && *l.Instance.Config.SSH.OverVsock {
 		logrus.Warn(".ssh.overVsock is not implemented yet for QEMU driver")
 	}
+
+	// Warn when the host cannot forward guest ICMP, so that a failing `ping` is
+	// not mistaken for a broken network.
+	osutil.WarnIfICMPUnavailable()
 
 	qCfg := Config{
 		Name:         l.Instance.Name,

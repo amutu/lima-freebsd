@@ -1255,6 +1255,10 @@ var hvSupport = sync.OnceValues(func() (string, error) {
 	return osutil.Sysctl(context.TODO(), "kern.hv_support")
 })
 
+// warnNoQEMUAccel emits the "no hardware accelerator" warning only once,
+// because Accel is called several times per VM start.
+var warnNoQEMUAccel sync.Once
+
 func Accel(arch limatype.Arch) string {
 	if limatype.IsNativeArch(arch) {
 		switch runtime.GOOS {
@@ -1277,6 +1281,16 @@ func Accel(arch limatype.Arch) string {
 			return "nvmm"
 		case "windows":
 			return "whpx"
+		case "freebsd":
+			// QEMU has no bhyve backend and there is no KVM/NVMM/HVF on FreeBSD,
+			// so the only accelerator left is TCG (pure emulation).
+			// FreeBSD users are expected to use the bhyve driver for accelerated VMs.
+			warnNoQEMUAccel.Do(func() {
+				logrus.Warn("QEMU on FreeBSD has no hardware accelerator (no bhyve/KVM backend). " +
+					"Falling back to TCG; expect very poor performance. " +
+					"Consider `vmType: bhyve` for native-architecture guests.")
+			})
+			return "tcg"
 		}
 	}
 	return "tcg"

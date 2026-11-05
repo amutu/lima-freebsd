@@ -98,17 +98,18 @@ const (
 	VIRTIOFS MountType = "virtiofs"
 	WSLMount MountType = "wsl2"
 
-	QEMU VMType = "qemu"
-	VZ   VMType = "vz"
-	WSL2 VMType = "wsl2"
-	HCS  VMType = "hcs"
+	QEMU  VMType = "qemu"
+	VZ    VMType = "vz"
+	WSL2  VMType = "wsl2"
+	HCS   VMType = "hcs"
+	BHYVE VMType = "bhyve"
 )
 
 var (
 	OSTypes    = []OS{LINUX, DARWIN, FREEBSD, WINDOWS}
 	ArchTypes  = []Arch{X8664, AARCH64, ARMV7L, PPC64LE, RISCV64, S390X}
 	MountTypes = []MountType{REVSSHFS, NINEP, VIRTIOFS, WSLMount}
-	VMTypes    = []VMType{QEMU, VZ, WSL2, HCS}
+	VMTypes    = []VMType{QEMU, VZ, WSL2, HCS, BHYVE}
 )
 
 type User struct {
@@ -440,6 +441,11 @@ func DefaultDriver() VMType {
 	switch runtime.GOOS {
 	case "darwin":
 		return VZ
+	case "freebsd":
+		// bhyve is the native hypervisor on FreeBSD. The QEMU driver is still
+		// usable there, but only with TCG (no hardware acceleration), so it is
+		// reserved for non-native architectures.
+		return BHYVE
 	default:
 		return QEMU
 	}
