@@ -14,6 +14,7 @@ import (
 	"gotest.tools/v3/assert"
 
 	"github.com/lima-vm/lima/v2/pkg/limatype"
+	"github.com/lima-vm/lima/v2/pkg/limayaml"
 )
 
 // newTestConfig builds a Config whose instance directory contains a disk and a
@@ -36,10 +37,10 @@ func newTestConfig(t *testing.T, arch limatype.Arch, mountType limatype.MountTyp
 		Mounts:    mounts,
 	}
 	return Config{
-		Name:         "default",
-		InstanceDir:  dir,
-		LimaYAML:     y,
-		SSHLocalPort: 60022,
+		Name:        "default",
+		InstanceDir: dir,
+		LimaYAML:    y,
+		Tap:         "tap1",
 	}
 }
 
@@ -87,7 +88,7 @@ func TestCmdlineAmd64(t *testing.T) {
 	assert.Assert(t, hasArg(args, "0,hostbridge"), args)
 	assert.Assert(t, hasArg(args, "1,virtio-blk,"+filepath.Join(cfg.InstanceDir, "disk")), args)
 	assert.Assert(t, hasArg(args, "2,ahci-cd,"+filepath.Join(cfg.InstanceDir, "cidata.iso")), args)
-	assert.Assert(t, hasArg(args, "3,virtio-net,slirp,hostfwd=tcp::60022-:22"), args)
+	assert.Assert(t, hasArg(args, "3,virtio-net,tap1,mac="+limayaml.MACAddress(cfg.InstanceDir)), args)
 	assert.Assert(t, hasArg(args, "4,virtio-rnd"), args)
 
 	// The last argument is the VM name.
@@ -114,7 +115,32 @@ func TestCmdlineArm64(t *testing.T) {
 		assert.Assert(t, !strings.HasSuffix(a, ",lpc"), "arm64 must not configure an LPC bridge: %v", args)
 	}
 	assert.Assert(t, hasArg(args, "-D"), "%v", args)
-	assert.Assert(t, hasArg(args, "3,virtio-net,slirp,hostfwd=tcp::60022-:22"), "%v", args)
+	assert.Assert(t, hasArg(args, "3,virtio-net,tap1,mac="+limayaml.MACAddress(cfg.InstanceDir)), "%v", args)
+}
+
+func TestCmdlineSlirp(t *testing.T) {
+	fw := fakeFirmware(t)
+	cfg := newTestConfig(t, limatype.X8664, limatype.REVSSHFS, nil)
+	cfg.LimaYAML.VMOpts = limatype.VMOpts{limatype.BHYVE: map[string]any{"firmware": fw}}
+	cfg.Tap = ""
+	cfg.Slirp = true
+	cfg.SSHLocalPort = 60022
+
+	_, args, err := Cmdline(cfg, "freebsd", "amd64")
+	assert.NilError(t, err)
+	assert.Assert(t, hasArg(args, "3,virtio-net,slirp,open,hostfwd=tcp::60022-:22,mac="+limayaml.MACAddress(cfg.InstanceDir)), args)
+}
+
+func TestCmdlineRejectsSlirpWithoutPort(t *testing.T) {
+	fw := fakeFirmware(t)
+	cfg := newTestConfig(t, limatype.X8664, limatype.REVSSHFS, nil)
+	cfg.LimaYAML.VMOpts = limatype.VMOpts{limatype.BHYVE: map[string]any{"firmware": fw}}
+	cfg.Tap = ""
+	cfg.Slirp = true
+	cfg.SSHLocalPort = 0
+
+	_, _, err := Cmdline(cfg, "freebsd", "amd64")
+	assert.ErrorContains(t, err, "SSH local port")
 }
 
 func TestCmdlineNinePMounts(t *testing.T) {
@@ -170,14 +196,14 @@ func TestCmdlineRejectsForeignArch(t *testing.T) {
 	assert.ErrorContains(t, err, "vmType: qemu")
 }
 
-func TestCmdlineRejectsInvalidSSHPort(t *testing.T) {
+func TestCmdlineRejectsEmptyTap(t *testing.T) {
 	fw := fakeFirmware(t)
 	cfg := newTestConfig(t, limatype.X8664, limatype.REVSSHFS, nil)
 	cfg.LimaYAML.VMOpts = limatype.VMOpts{limatype.BHYVE: map[string]any{"firmware": fw}}
-	cfg.SSHLocalPort = 0
+	cfg.Tap = ""
 
 	_, _, err := Cmdline(cfg, "freebsd", "amd64")
-	assert.ErrorContains(t, err, "SSH local port")
+	assert.ErrorContains(t, err, "tap interface")
 }
 
 func TestCmdlineRejectsMissingDisk(t *testing.T) {
@@ -253,15 +279,15 @@ func TestFillConfigDefaultMountType(t *testing.T) {
 	cfg := &limatype.LimaYAML{}
 	assert.NilError(t, fillConfig(cfg))
 	assert.Assert(t, cfg.MountType != nil)
-	assert.Equal(t, *cfg.MountType, limatype.REVSSHFS)
+	assert.Equal(t, *cfg.MountType, limatype.NINEP)
 	assert.Assert(t, cfg.VMType != nil)
 	assert.Equal(t, *cfg.VMType, limatype.BHYVE)
 
 	// An explicit mountType is preserved.
-	ninep := limatype.NINEP
-	cfg2 := &limatype.LimaYAML{MountType: &ninep}
+	revsshfs := limatype.REVSSHFS
+	cfg2 := &limatype.LimaYAML{MountType: &revsshfs}
 	assert.NilError(t, fillConfig(cfg2))
-	assert.Equal(t, *cfg2.MountType, limatype.NINEP)
+	assert.Equal(t, *cfg2.MountType, limatype.REVSSHFS)
 }
 
 func TestSanitizeVMName(t *testing.T) {

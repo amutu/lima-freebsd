@@ -27,13 +27,18 @@ import (
 
 // Config holds everything needed to build a bhyve command line.
 type Config struct {
-	Name         string
-	InstanceDir  string
-	LimaYAML     *limatype.LimaYAML
+	Name        string
+	InstanceDir string
+	LimaYAML    *limatype.LimaYAML
+	// Tap is the host tap(4) interface attached to the configured bridge.
+	Tap string
+	// Slirp uses the libslirp backend instead of a tap. FreeBSD >= 15.1 only.
+	Slirp bool
+	// SSHLocalPort is the host-side port forwarded to guest:22 in slirp mode.
 	SSHLocalPort int
 }
 
-// Guest SSHD port. bhyve's slirp backend forwards host:SSHLocalPort to this.
+// Guest SSHD port used by the slirp hostfwd rule.
 const guestSSHPort = 22
 
 // PCI slots. Slot 0 is the host bridge and slot 31 is reserved for the LPC
@@ -212,14 +217,27 @@ func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
 		args = append(args, "-s", fmt.Sprintf("%d,ahci-cd,%s", slotCIData, cidataPath))
 	}
 
-	// Networking: libslirp gives us user-mode NAT plus a static host->guest
-	// forward for SSH, without any host network configuration and without root.
-	// Everything else (dynamic port forwarding, the guest agent) rides on SSH.
-	if cfg.SSHLocalPort <= 0 {
-		return "", nil, fmt.Errorf("invalid SSH local port %d", cfg.SSHLocalPort)
+	// Networking: either a tap(4) attached to the configured bridge, or the
+	// libslirp backend with "open" (FreeBSD >= 15.1). Slirp keeps the
+	// host-to-guest port forward for SSH; the bridge reaches the guest at its
+	// static address directly.
+	//
+	// The MAC must match limayaml.MACAddress(instanceDir), because the cidata
+	// network-config matches the interface by that address. Without it cloud-init
+	// waits for a device that never appears and never configures the interface.
+	mac := limayaml.MACAddress(cfg.InstanceDir)
+	if cfg.Slirp {
+		if cfg.SSHLocalPort <= 0 {
+			return "", nil, fmt.Errorf("invalid SSH local port %d", cfg.SSHLocalPort)
+		}
+		args = append(args, "-s", fmt.Sprintf("%d,virtio-net,slirp,open,hostfwd=tcp::%d-:%d,mac=%s",
+			slotNet, cfg.SSHLocalPort, guestSSHPort, mac))
+	} else {
+		if cfg.Tap == "" {
+			return "", nil, errors.New("tap interface is not set")
+		}
+		args = append(args, "-s", fmt.Sprintf("%d,virtio-net,%s,mac=%s", slotNet, cfg.Tap, mac))
 	}
-	args = append(args, "-s", fmt.Sprintf("%d,virtio-net,slirp,hostfwd=tcp::%d-:%d",
-		slotNet, cfg.SSHLocalPort, guestSSHPort))
 
 	// Entropy.
 	args = append(args, "-s", fmt.Sprintf("%d,virtio-rnd", slotRnd))
@@ -278,20 +296,10 @@ func isNativeArch(arch limatype.Arch, goarch string) bool {
 	}
 }
 
-// BhyveOpts mirrors vmOpts.bhyve.
-type BhyveOpts struct {
-	// Firmware overrides the auto-detected boot ROM path.
-	Firmware string `yaml:"firmware,omitempty" json:"firmware,omitempty"`
-}
-
 // FirmwareOverride extracts vmOpts.bhyve.firmware, if any.
 func FirmwareOverride(y *limatype.LimaYAML) string {
-	raw, ok := y.VMOpts[limatype.BHYVE]
-	if !ok || raw == nil {
-		return ""
-	}
-	var opts BhyveOpts
-	if err := limayaml.Convert(raw, &opts, "vmOpts.bhyve"); err != nil {
+	opts, err := limayaml.BhyveOptsFrom(y)
+	if err != nil {
 		return ""
 	}
 	return opts.Firmware
@@ -305,10 +313,10 @@ func fillConfig(cfg *limatype.LimaYAML) error {
 	cfg.VMType = new(limatype.BHYVE)
 
 	if cfg.MountType == nil || *cfg.MountType == "" || *cfg.MountType == "default" {
-		// reverse-sshfs is the conservative default: it needs nothing from bhyve
-		// beyond a working network stack, whereas virtio-9p has to be verified
-		// against the guest kernel. Users can opt in with `mountType: 9p`.
-		cfg.MountType = new(limatype.REVSSHFS)
+		// 9p is the default: it is serviced by bhyve itself (virtio-9p) and
+		// needs no extra packages in the guest. reverse-sshfs remains available
+		// opt-in for guests that ship sshfs.
+		cfg.MountType = new(limatype.NINEP)
 	}
 	return nil
 }

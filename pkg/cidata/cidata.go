@@ -192,6 +192,18 @@ func templateArgs(ctx context.Context, bootScripts bool, instDir, name string, i
 		}
 		args.SlirpGateway = usernet.GatewayIP(subnet)
 		args.SlirpDNS = usernet.GatewayIP(subnet)
+	} else if *instConfig.VMType == limatype.BHYVE {
+		// bhyve attaches a tap to the configured bridge. The guest gets a
+		// static address outside the bridge's DHCP pool, and uses the host's
+		// resolver through the bridge's NAT rule.
+		netConfig, err := limayaml.ResolveBhyveNetwork(instDir, instConfig)
+		if err != nil {
+			return nil, err
+		}
+		args.SlirpGateway = netConfig.Gateway.String()
+		args.SlirpDNS = netConfig.Gateway.String()
+		args.SlirpIPAddress = netConfig.Address.String()
+		args.SlirpPrefixLen = netConfig.PrefixLen
 	} else {
 		subnet, _, err = net.ParseCIDR(networks.SlirpNetwork)
 		if err != nil {
@@ -326,6 +338,18 @@ func templateArgs(ctx context.Context, bootScripts bool, instDir, name string, i
 	case len(instConfig.DNS) > 0:
 		for _, addr := range instConfig.DNS {
 			args.DNSAddresses = append(args.DNSAddresses, addr.String())
+		}
+	case *instConfig.VMType == limatype.BHYVE:
+		// The guest reaches the host's resolver through the vm-public NAT, so
+		// use the host's real nameservers instead of the host-agent DNS proxy.
+		// This also leaves UDPDNSLocalPort/TCPDNSLocalPort at zero, which skips
+		// the iptables-based DNS redirection in the guest.
+		args.DNSAddresses, err = osutil.DNSAddresses()
+		if err != nil {
+			return nil, err
+		}
+		if len(args.DNSAddresses) > 0 {
+			args.SlirpDNS = args.DNSAddresses[0]
 		}
 	case firstUsernetIndex != -1 || *instConfig.VMType == limatype.VZ:
 		args.DNSAddresses = append(args.DNSAddresses, args.SlirpDNS)

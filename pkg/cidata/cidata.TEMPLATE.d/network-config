@@ -4,14 +4,22 @@ ethernets:
   {{$nw.Interface}}:
     match:
       macaddress: '{{$nw.MACAddress}}'
-    dhcp4: true
     set-name: {{$nw.Interface}}
     {{- if eq $.Param.internal_netplanOptional "true" }}
     optional: true
     {{- end }}
+    {{- if and (eq $.VMType "bhyve") (eq $nw.Interface $.SlirpNICName) }}
+    addresses:
+      - '{{$.SlirpIPAddress}}/{{$.SlirpPrefixLen}}'
+    routes:
+      - to: default
+        via: {{$.SlirpGateway}}
+    {{- else }}
+    dhcp4: true
     dhcp4-overrides:
       route-metric: {{$nw.Metric}}
     dhcp-identifier: mac
+    {{- end }}
     {{- if and (eq $nw.Interface $.SlirpNICName) (gt (len $.DNSAddresses) 0) }}
     nameservers:
       addresses:

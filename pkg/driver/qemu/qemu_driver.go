@@ -254,12 +254,13 @@ func validateMountType(cfg *limatype.LimaYAML) error {
 				return fmt.Errorf("field `mountType` must be %#q for QEMU driver on Windows, got %#q", limatype.REVSSHFS, *cfg.MountType)
 			}
 		case "freebsd":
-			// QEMU on FreeBSD is built without virtfs support, see fillConfig().
+			// Recent FreeBSD QEMU packages enable virtfs (9p). virtiofs still
+			// needs the Linux-only virtiofsd/vhost-user combination.
 			switch *cfg.MountType {
-			case limatype.REVSSHFS:
+			case limatype.REVSSHFS, limatype.NINEP:
 				return nil
 			default:
-				return fmt.Errorf("field `mountType` must be %#q for QEMU driver on FreeBSD, got %#q", limatype.REVSSHFS, *cfg.MountType)
+				return fmt.Errorf("field `mountType` must be %#q or %#q for QEMU driver on FreeBSD, got %#q", limatype.REVSSHFS, limatype.NINEP, *cfg.MountType)
 			}
 		default:
 			switch *cfg.MountType {
@@ -327,11 +328,10 @@ func fillConfig(cfg *limatype.LimaYAML, instDir string) error {
 	}
 
 	if runtime.GOOS == "freebsd" {
-		// QEMU's -virtfs (9p) can only be enabled when the host is Linux or macOS;
-		// the FreeBSD build fails with:
-		//   ERROR: Feature virtfs cannot be enabled: virtio-9p (virtfs) requires Linux or macOS
-		// virtiofs is likewise unavailable (it needs virtiofsd + vhost-user, Linux-only).
-		mountTypesUnsupported[limatype.NINEP] = struct{}{}
+		// virtiofs needs the Linux-only virtiofsd/vhost-user combination.
+		// 9p is available when QEMU was built with virtfs, which recent
+		// FreeBSD packages enable; users on an older build can pin
+		// `mountType: reverse-sshfs`.
 		mountTypesUnsupported[limatype.VIRTIOFS] = struct{}{}
 	}
 

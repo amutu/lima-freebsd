@@ -12,10 +12,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +26,7 @@ import (
 	"github.com/lima-vm/lima/v2/pkg/iso9660util"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
+	"github.com/lima-vm/lima/v2/pkg/limayaml"
 )
 
 // ErrNotSupported is returned by operations the bhyve driver does not implement.
@@ -38,10 +37,13 @@ type LimaBhyveDriver struct {
 	Instance     *limatype.Instance
 	SSHLocalPort int
 
-	cmd     *exec.Cmd
-	waitCh  chan error
-	vmName  string
-	stopMux sync.Mutex
+	cmd       *exec.Cmd
+	waitCh    chan error
+	vmName    string
+	tapName   string
+	bridge    string
+	netConfig limayaml.BhyveNetworkConfig
+	stopMux   sync.Mutex
 }
 
 var _ driver.Driver = (*LimaBhyveDriver)(nil)
@@ -54,8 +56,26 @@ func (l *LimaBhyveDriver) Configure(_ context.Context, inst *limatype.Instance) 
 	if err := fillConfig(inst.Config); err != nil {
 		return nil, err
 	}
+	netConfig, err := limayaml.ResolveBhyveNetwork(inst.Dir, inst.Config)
+	if err != nil {
+		return nil, err
+	}
 	l.Instance = inst
-	l.SSHLocalPort = inst.SSHLocalPort
+	l.netConfig = netConfig
+	l.bridge = netConfig.Bridge
+	switch netConfig.Mode {
+	case limayaml.BhyveModeSlirp:
+		// Slirp is reached through the host-side hostfwd; keep the free port
+		// allocated by the host agent.
+		l.SSHLocalPort = inst.SSHLocalPort
+		inst.SSHAddress = "127.0.0.1"
+	default:
+		// The tap is bridged, so the guest is reachable directly at its
+		// static address and sshd listens on the standard port.
+		l.SSHLocalPort = 22
+		inst.SSHLocalPort = 22
+		inst.SSHAddress = netConfig.Address.String()
+	}
 	return &driver.ConfiguredDriver{Driver: l}, nil
 }
 
@@ -112,36 +132,55 @@ func (l *LimaBhyveDriver) Start(ctx context.Context) (chan error, error) {
 		return nil, err
 	}
 
-	cfg := Config{
-		Name:         l.Instance.Name,
-		InstanceDir:  l.Instance.Dir,
-		LimaYAML:     l.Instance.Config,
-		SSHLocalPort: l.SSHLocalPort,
-	}
-	exe, args, err := Cmdline(cfg, runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		return nil, err
-	}
 	l.vmName = VMName(l.Instance.Name, l.Instance.Dir)
-
 	if err := ensureVMM(ctx); err != nil {
 		return nil, err
 	}
 
-	// bhyve itself must run as root unless the user is in the "vmm" group.
+	var tap string
+	var err error
+	if l.netConfig.Mode == limayaml.BhyveModeSlirp {
+		if err := checkSlirpPrerequisites(); err != nil {
+			return nil, err
+		}
+	} else {
+		tap, err = l.createTap(ctx, l.netConfig.Bridge)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	cfg := Config{
+		Name:         l.Instance.Name,
+		InstanceDir:  l.Instance.Dir,
+		LimaYAML:     l.Instance.Config,
+		Tap:          tap,
+		Slirp:        l.netConfig.Mode == limayaml.BhyveModeSlirp,
+		SSHLocalPort: l.SSHLocalPort,
+	}
+	exe, args, err := Cmdline(cfg, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		l.cleanupTap(ctx)
+		return nil, err
+	}
+
+	// bhyve must run as root: the tap device created by ifconfig is owned by
+	// root and cannot be opened by an unprivileged process.
 	argv := append([]string{exe}, args...)
-	if needsSudo() {
+	if os.Geteuid() != 0 {
 		argv = append([]string{"sudo", "-n"}, argv...)
 	}
 
 	serialLog := filepath.Join(l.Instance.Dir, filenames.SerialLog)
 	logFile, err := os.Create(serialLog)
 	if err != nil {
+		l.cleanupTap(ctx)
 		return nil, err
 	}
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		logFile.Close()
+		l.cleanupTap(ctx)
 		return nil, err
 	}
 
@@ -154,6 +193,7 @@ func (l *LimaBhyveDriver) Start(ctx context.Context) (chan error, error) {
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		devNull.Close()
+		l.cleanupTap(ctx)
 		return nil, fmt.Errorf("failed to start bhyve: %w", err)
 	}
 
@@ -232,6 +272,7 @@ func (l *LimaBhyveDriver) Stop(ctx context.Context) error {
 	}
 
 	if l.waitCh == nil {
+		l.cleanupTap(ctx)
 		return nil
 	}
 	select {
@@ -240,8 +281,10 @@ func (l *LimaBhyveDriver) Stop(ctx context.Context) error {
 		if l.cmd != nil && l.cmd.Process != nil {
 			_ = l.cmd.Process.Kill()
 		}
+		l.cleanupTap(ctx)
 		return fmt.Errorf("bhyve VM %#q did not exit within 30s of being destroyed", vmName)
 	}
+	l.cleanupTap(ctx)
 	return nil
 }
 
@@ -256,12 +299,25 @@ func (l *LimaBhyveDriver) Delete(ctx context.Context) error {
 	}
 	vmName := VMName(l.Instance.Name, l.Instance.Dir)
 	_, _ = runBhyvectl(ctx, "--destroy", "--vm="+vmName)
+	l.cleanupTap(ctx)
 	return nil
 }
 
 func (l *LimaBhyveDriver) InspectStatus(_ context.Context, inst *limatype.Instance) string {
 	if inst == nil {
 		return ""
+	}
+	// The guest address is static, so expose it to `limactl list` and
+	// `limactl show-ssh` even while the instance is stopped.
+	if netConfig, err := limayaml.ResolveBhyveNetwork(inst.Dir, inst.Config); err == nil {
+		if netConfig.Mode == limayaml.BhyveModeSlirp {
+			inst.SSHAddress = "127.0.0.1"
+		} else {
+			inst.SSHAddress = netConfig.Address.String()
+			inst.SSHLocalPort = 22
+		}
+	} else {
+		logrus.WithError(err).Warn("Failed to resolve the bhyve network configuration")
 	}
 	name := VMName(inst.Name, inst.Dir)
 	if _, err := os.Stat(filepath.Join("/dev/vmm", name)); err == nil {
@@ -292,7 +348,20 @@ func (l *LimaBhyveDriver) Info(_ context.Context) driver.Info {
 }
 
 func (l *LimaBhyveDriver) SSHAddress(_ context.Context) (string, error) {
-	return "127.0.0.1", nil
+	if l.Instance == nil {
+		return "", errors.New("bhyve driver is not configured")
+	}
+	if l.Instance.SSHAddress != "" {
+		return l.Instance.SSHAddress, nil
+	}
+	netConfig, err := limayaml.ResolveBhyveNetwork(l.Instance.Dir, l.Instance.Config)
+	if err != nil {
+		return "", err
+	}
+	if netConfig.Mode == limayaml.BhyveModeSlirp {
+		return "127.0.0.1", nil
+	}
+	return netConfig.Address.String(), nil
 }
 
 func (l *LimaBhyveDriver) AdditionalSetupForSSH(_ context.Context) error {
@@ -345,6 +414,7 @@ func (l *LimaBhyveDriver) ListSnapshots(_ context.Context) ([]driver.Snapshot, e
 const (
 	bhyveExe     = "/usr/sbin/bhyve"
 	bhyvectlExe  = "/usr/sbin/bhyvectl"
+	tapFileName  = "bhyve.tap"
 	libslirpPath = "/usr/local/lib/libslirp.so"
 )
 
@@ -355,12 +425,106 @@ func checkPrerequisites(ctx context.Context) error {
 			return fmt.Errorf("%#q is not available: %w (bhyve is part of the FreeBSD base system)", exe, err)
 		}
 	}
-	// bhyve dlopen()s libslirp for the user-mode network backend.
+	return nil
+}
+
+func checkSlirpPrerequisites() error {
 	if _, err := os.Stat(libslirpPath); err != nil {
-		return fmt.Errorf("libslirp is required by the bhyve slirp network backend but %#q is missing (hint: pkg install libslirp): %w",
+		return fmt.Errorf("libslirp is required by the bhyve slirp backend but %#q is missing (hint: pkg install libslirp): %w",
 			libslirpPath, err)
 	}
 	return nil
+}
+
+// tapFilePath records the tap interface name so that Stop and Delete can clean
+// it up even after the host agent has been restarted.
+func (l *LimaBhyveDriver) tapFilePath() string {
+	return filepath.Join(l.Instance.Dir, tapFileName)
+}
+
+// createTap creates a tap(4) device and attaches it to the configured bridge.
+func (l *LimaBhyveDriver) createTap(ctx context.Context, bridge string) (string, error) {
+	if bridge == "" {
+		return "", errors.New("bridge is not configured")
+	}
+	if out, err := runCmd(ctx, "ifconfig", bridge); err != nil {
+		return "", fmt.Errorf("bridge %#q is not available: %w (%s); hint: create it with "+
+			"`vm switch create public` and attach a host interface with `vm switch add public <iface>`",
+			bridge, err, strings.TrimSpace(out))
+	}
+	out, err := runRoot(ctx, "ifconfig", "tap", "create")
+	if err != nil {
+		return "", fmt.Errorf("failed to create a tap interface: %w (%s)", err, strings.TrimSpace(out))
+	}
+	tap := strings.TrimSpace(out)
+	if tap == "" {
+		return "", errors.New("ifconfig tap create returned an empty interface name")
+	}
+	cleanup := func() {
+		_, _ = runRoot(ctx, "ifconfig", bridge, "deletem", tap)
+		_, _ = runRoot(ctx, "ifconfig", tap, "destroy")
+	}
+	if out, err := runRoot(ctx, "ifconfig", tap, "up"); err != nil {
+		cleanup()
+		return "", fmt.Errorf("failed to bring up %#q: %w (%s)", tap, err, strings.TrimSpace(out))
+	}
+	if out, err := runRoot(ctx, "ifconfig", bridge, "addm", tap); err != nil {
+		cleanup()
+		return "", fmt.Errorf("failed to attach %#q to %#q: %w (%s)", tap, bridge, err, strings.TrimSpace(out))
+	}
+	// Record both names: the bridge may be reconfigured between Start and Stop.
+	if err := os.WriteFile(l.tapFilePath(), []byte(bridge+"\n"+tap+"\n"), 0o600); err != nil {
+		cleanup()
+		return "", fmt.Errorf("failed to record the tap interface: %w", err)
+	}
+	l.bridge = bridge
+	l.tapName = tap
+	return tap, nil
+}
+
+// readTapRecord returns the bridge and tap names recorded at Start.
+func (l *LimaBhyveDriver) readTapRecord() (bridge, tap string) {
+	if l.Instance == nil {
+		return "", ""
+	}
+	b, err := os.ReadFile(l.tapFilePath())
+	if err != nil {
+		return "", ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	switch len(lines) {
+	case 1:
+		// Compatibility with the earlier one-line format.
+		return "", strings.TrimSpace(lines[0])
+	case 2:
+		return strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1])
+	default:
+		return "", ""
+	}
+}
+
+// cleanupTap detaches and destroys the tap interface, if any.
+func (l *LimaBhyveDriver) cleanupTap(ctx context.Context) {
+	bridge, tap := l.readTapRecord()
+	if bridge == "" {
+		bridge = l.bridge
+	}
+	if tap == "" {
+		tap = l.tapName
+	}
+	if bridge == "" {
+		bridge = limayaml.DefaultBhyveBridge
+	}
+	if tap == "" {
+		return
+	}
+	_, _ = runRoot(ctx, "ifconfig", bridge, "deletem", tap)
+	_, _ = runRoot(ctx, "ifconfig", tap, "destroy")
+	l.tapName = ""
+	l.bridge = ""
+	if l.Instance != nil {
+		_ = os.Remove(l.tapFilePath())
+	}
 }
 
 // ensureVMM loads the vmm(4) kernel module if it is not loaded yet.
@@ -368,18 +532,12 @@ func ensureVMM(ctx context.Context) error {
 	if _, err := os.Stat("/dev/vmm"); err == nil {
 		return nil
 	}
-	// kldload always needs root; membership of the "vmm" group is enough to
-	// *run* bhyve, but not to load kernel modules.
-	args := []string{"kldload", "vmm"}
-	if os.Geteuid() != 0 {
-		args = append([]string{"sudo", "-n"}, args...)
-	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		if strings.Contains(string(out), "already loaded") {
+	out, err := runRoot(ctx, "kldload", "vmm")
+	if err != nil {
+		if strings.Contains(out, "already loaded") {
 			return nil
 		}
-		return fmt.Errorf("failed to load the vmm kernel module: %w (%s)", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("failed to load the vmm kernel module: %w (%s)", err, strings.TrimSpace(out))
 	}
 	if _, err := os.Stat("/dev/vmm"); err != nil {
 		return fmt.Errorf("vmm loaded but /dev/vmm is still missing; the CPU or the hypervisor may not support "+
@@ -389,41 +547,23 @@ func ensureVMM(ctx context.Context) error {
 }
 
 func runBhyvectl(ctx context.Context, args ...string) (string, error) {
-	argv := append([]string{bhyvectlExe}, args...)
-	if needsSudo() {
+	return runRoot(ctx, bhyvectlExe, args...)
+}
+
+// runCmd runs a command without elevation.
+func runCmd(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runRoot runs a command as root, using passwordless sudo when needed.
+func runRoot(ctx context.Context, name string, args ...string) (string, error) {
+	argv := append([]string{name}, args...)
+	if os.Geteuid() != 0 {
 		argv = append([]string{"sudo", "-n"}, argv...)
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-// needsSudo reports whether bhyve must be started through sudo.
-//
-// bhyve requires root, or membership of the "vmm" group (see vmm(4)).
-func needsSudo() bool {
-	if os.Geteuid() == 0 {
-		return false
-	}
-	g, err := user.LookupGroup("vmm")
-	if err != nil {
-		return true
-	}
-	gid, err := strconv.Atoi(g.Gid)
-	if err != nil {
-		return true
-	}
-	if os.Getgid() == gid {
-		return false
-	}
-	groups, err := os.Getgroups()
-	if err != nil {
-		return true
-	}
-	for _, id := range groups {
-		if id == gid {
-			return false
-		}
-	}
-	return true
 }

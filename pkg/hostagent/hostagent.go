@@ -429,9 +429,19 @@ func (a *HostAgent) Run(ctx context.Context) error {
 		if hosts == nil {
 			hosts = make(map[string]string)
 		}
-		hosts["host.lima.internal"] = networks.SlirpGateway
+		gateway := networks.SlirpGateway
+		guestIP := networks.SlirpIPAddress
+		if *a.instConfig.VMType == limatype.BHYVE {
+			netConfig, err := limayaml.ResolveBhyveNetwork(a.instDir, a.instConfig)
+			if err != nil {
+				return err
+			}
+			gateway = netConfig.Gateway.String()
+			guestIP = netConfig.Address.String()
+		}
+		hosts["host.lima.internal"] = gateway
 		name := hostname.FromInstName(a.instName) // TODO: support customization
-		hosts[name] = networks.SlirpIPAddress
+		hosts[name] = guestIP
 		srvOpts := dns.ServerOptions{
 			UDPPort: a.udpDNSLocalPort,
 			TCPPort: a.tcpDNSLocalPort,
