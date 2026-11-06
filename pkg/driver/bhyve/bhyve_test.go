@@ -87,7 +87,7 @@ func TestCmdlineAmd64(t *testing.T) {
 	assert.Equal(t, argAfter(t, args, "-m"), "4096M")
 	assert.Assert(t, hasArg(args, "0,hostbridge"), args)
 	assert.Assert(t, hasArg(args, "1,virtio-blk,"+filepath.Join(cfg.InstanceDir, "disk")), args)
-	assert.Assert(t, hasArg(args, "2,ahci-cd,"+filepath.Join(cfg.InstanceDir, "cidata.iso")), args)
+	assert.Assert(t, hasArg(args, "2,virtio-blk,"+filepath.Join(cfg.InstanceDir, "cidata.iso")), args)
 	assert.Assert(t, hasArg(args, "3,virtio-net,tap1,mac="+limayaml.MACAddress(cfg.InstanceDir)), args)
 	assert.Assert(t, hasArg(args, "4,virtio-rnd"), args)
 

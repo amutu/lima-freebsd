@@ -392,6 +392,8 @@ QEMU 在 FreeBSD 上：
 | bhyve 启动后马上结束 | guest 发起了 reboot；bhyve 视为实例结束，重新 `limactl start <name>` |
 | QEMU guest `ping` 公网失败 | 预期限制；用 TCP/UDP 验证 |
 | `sshfs` 相关失败 | 改用 `9p`，或在 guest 中安装 `sshfs` |
+| `Permission denied (publickey)` 且 guest 中 `passwd` 字段为 `*LOCKED*` | 这是旧版本 `lock_passwd: true` 造成的：`pw lock` 写入 `*LOCKED*`，FreeBSD 的 sshd 会拒绝**所有**认证方式。用当前版本重建实例即可；临时办法是在 guest 控制台执行 `pw unlock -n <user>` |
+| guest 无默认路由（`10.0.2.15` 已配置但 `ping 10.0.2.2` 不通） | nuageinit 只认 netplan 的 `gateway4`；旧版 cidata 用 `routes` 导致路由缺失。升级后重建实例 |
 | `limactl list` 出现版本警告 | 旧实例的 `lima-version` 元数据；不影响使用 |
 | 残留 tap 设备 | `sudo ifconfig vm-public deletem tapN && sudo ifconfig tapN destroy` |
 

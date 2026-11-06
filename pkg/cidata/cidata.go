@@ -312,7 +312,7 @@ func templateArgs(ctx context.Context, bootScripts bool, instDir, name string, i
 		}
 		args.Disks = append(args.Disks, Disk{
 			Name:       d.Name,
-			Device:     diskDeviceNameFromOrder(i),
+			Device:     diskDeviceNameFromOrder(i, *instConfig.VMType),
 			Format:     format,
 			FSType:     fstype,
 			FSArgs:     d.FSArgs,
@@ -587,8 +587,19 @@ func getBootCmds(p []limatype.Provision) []BootCmds {
 	return bootCmds
 }
 
-func diskDeviceNameFromOrder(order int) string {
-	return fmt.Sprintf("vd%c", int('b')+order)
+// diskDeviceNameFromOrder returns the guest device name of the additional disk
+// at order.
+//
+// Virtio block devices are named in attachment order, with the root disk as
+// vda. On bhyve the cloud-init seed is attached as a virtio-blk device, taking
+// vdb, so the additional disks start at vdc. Other drivers attach the seed as a
+// CD-ROM and the disks start at vdb.
+func diskDeviceNameFromOrder(order int, vmType limatype.VMType) string {
+	first := int('b')
+	if vmType == limatype.BHYVE {
+		first = int('c')
+	}
+	return fmt.Sprintf("vd%c", first+order)
 }
 
 func writeCIDataDir(rootPath string, layout []iso9660util.Entry) error {

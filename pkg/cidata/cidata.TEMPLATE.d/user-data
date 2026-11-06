@@ -56,22 +56,30 @@ users:
     {{/* (Why doesn't macOS VM support graceful shutdown?) */}}
     sudo: ALL=(ALL) NOPASSWD:/sbin/shutdown -h now
 {{- else }}
+    {{- /* Do not set `lock_passwd` on FreeBSD: nuageinit implements it with `pw lock`,
+         which stores `*LOCKED*` in the password field, and sshd(8) then refuses
+         every authentication method, public keys included (see `allowed_user`).
+         `*` disables password logins without locking the account. */}}
     {{- if .PasswordlessSudo }}
     sudo: ALL=(ALL) NOPASSWD:ALL
     {{- if eq .OS "FreeBSD" }}
     groups:
     - wheel
     doas: permit nopass :wheel
-    {{- end}}
+    passwd: "*"
+    {{- else }}
     lock_passwd: true
+    {{- end }}
     {{- else }}
     sudo: ALL=(ALL) ALL
     {{- if eq .OS "FreeBSD" }}
     groups:
     - wheel
     doas: permit :wheel
-    {{- end}}
+    passwd: "*"
+    {{- else }}
     lock_passwd: false
+    {{- end }}
     {{- end }}
 {{- end }}
 {{- if eq .OS "FreeBSD" }}

@@ -11,9 +11,15 @@ ethernets:
     {{- if and (eq $.VMType "bhyve") (eq $nw.Interface $.SlirpNICName) }}
     addresses:
       - '{{$.SlirpIPAddress}}/{{$.SlirpPrefixLen}}'
+    {{- if eq $.OS "FreeBSD" }}
+    {{- /* nuageinit only understands the netplan `gateway4` key for the IPv4 default route;
+         it ignores `routes`. */}}
+    gateway4: {{$.SlirpGateway}}
+    {{- else }}
     routes:
       - to: default
         via: {{$.SlirpGateway}}
+    {{- end }}
     {{- else }}
     dhcp4: true
     dhcp4-overrides:

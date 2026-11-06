@@ -18,6 +18,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/lima-vm/lima/v2/pkg/imgutil"
+	"github.com/lima-vm/lima/v2/pkg/imgutil/nativeimgutil"
 	"github.com/lima-vm/lima/v2/pkg/imgutil/proxyimgutil"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
@@ -114,7 +116,12 @@ func diskCreateAction(cmd *cobra.Command, args []string) error {
 
 	// qemu may not be available, use it only if needed.
 	dataDisk := filepath.Join(diskDir, filenames.DataDisk)
-	diskUtil := proxyimgutil.NewDiskUtil(ctx)
+	var diskUtil imgutil.ImageDiskManager = proxyimgutil.NewDiskUtil(ctx)
+	if format == "raw" {
+		// qemu-img always creates qcow2; raw disks are created natively as a
+		// sparse file so that drivers reading raw images (bhyve) can use them.
+		diskUtil = &nativeimgutil.NativeImageUtil{}
+	}
 	err = diskUtil.CreateDisk(ctx, dataDisk, diskSize)
 	if err != nil {
 		rerr := os.RemoveAll(diskDir)

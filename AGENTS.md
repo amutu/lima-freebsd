@@ -129,6 +129,15 @@ Other bhyve facts that are easy to get wrong:
   Windows falls back to `reverse-sshfs`. Recent FreeBSD `emulators/qemu` packages enable virtfs.
 - bhyve `-A/-H/-P` flags are amd64-only and are rejected on arm64; the console wiring differs
   between `-s N,lpc -l ...` (amd64) and `-o ...` (arm64).
+- FreeBSD guests take their `user-data`/`network-config` from `nuageinit`, which implements only a
+  subset of cloud-init and netplan. Two traps live in `pkg/cidata/cidata.TEMPLATE.d/`:
+  - the IPv4 default route must be written as `gateway4` (netplan's `routes:` is ignored), which is
+    why `network-config` emits `gateway4` when `OS` is FreeBSD;
+  - `user-data` must not set `lock_passwd` for FreeBSD. nuageinit implements it with `pw lock`,
+    which stores `*LOCKED*` in the password field, and FreeBSD's sshd `allowed_user()` then refuses
+    every authentication method, public keys included. Use `passwd: "*"` instead.
+  nuageinit also only runs the user/package phase on the first boot, so a broken instance cannot be
+  repaired by restarting it; recreate the instance.
 
 ## Conventions
 

@@ -19,10 +19,12 @@ import (
 	"strings"
 
 	"github.com/docker/go-units"
+	"github.com/sirupsen/logrus"
 
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
 	"github.com/lima-vm/lima/v2/pkg/limayaml"
+	"github.com/lima-vm/lima/v2/pkg/store"
 )
 
 // Config holds everything needed to build a bhyve command line.
@@ -211,10 +213,16 @@ func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
 	// Info().Features.SupportedImageFormats.
 	args = append(args, "-s", fmt.Sprintf("%d,virtio-blk,%s", slotDisk, diskPath))
 
-	// cloud-init / ignition seed, attached as a CD-ROM.
+	// cloud-init / ignition seed.
+	//
+	// Attached as virtio-blk, not ahci-cd: bhyve's AHCI controller only works if
+	// the guest loads the `ahci` module, which minimal cloud images (e.g. the
+	// Ubuntu minimal images used by Colima) do not always do. The seed would then
+	// be invisible and cloud-init would never configure the guest. virtio-blk is
+	// already required for the root disk, so the seed is always reachable.
 	cidataPath := filepath.Join(cfg.InstanceDir, filenames.CIDataISO)
 	if _, err := os.Stat(cidataPath); err == nil {
-		args = append(args, "-s", fmt.Sprintf("%d,ahci-cd,%s", slotCIData, cidataPath))
+		args = append(args, "-s", fmt.Sprintf("%d,virtio-blk,%s", slotCIData, cidataPath))
 	}
 
 	// Networking: either a tap(4) attached to the configured bridge, or the
@@ -242,10 +250,13 @@ func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
 	// Entropy.
 	args = append(args, "-s", fmt.Sprintf("%d,virtio-rnd", slotRnd))
 
+	// Slots from slotNinePFirst onwards are allocated dynamically for the 9p
+	// shares and the additional disks.
+	slot := slotNinePFirst
+
 	// 9p shares, when mountType is 9p. bhyve's virtio-9p is available on both
 	// amd64 and arm64 (verified with `bhyve -s help`).
 	if y.MountType != nil && *y.MountType == limatype.NINEP {
-		slot := slotNinePFirst
 		for _, f := range y.Mounts {
 			tag := limayaml.MountTag(f.Location, *f.MountPoint)
 			conf := fmt.Sprintf("%d,virtio-9p,%s=%s", slot, tag, f.Location)
@@ -255,6 +266,23 @@ func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
 			args = append(args, "-s", conf)
 			slot++
 		}
+	}
+
+	// Additional disks (e.g. Colima's container data disk) are attached as
+	// virtio-blk. bhyve reads raw images only, so such a disk must have been
+	// created with `limactl disk create --format raw`.
+	for _, d := range y.AdditionalDisks {
+		disk, err := store.InspectDisk(d.Name, d.FSType)
+		if err != nil {
+			return "", nil, fmt.Errorf("could not load disk %#q: %w", d.Name, err)
+		}
+		logrus.Infof("Mounting disk %#q on %#q", disk.Name, disk.MountPoint)
+		if err := disk.LockForInstance(cfg.InstanceDir); err != nil {
+			return "", nil, fmt.Errorf("could not attach disk %#q: %w", disk.Name, err)
+		}
+		dataDisk := filepath.Join(disk.Dir, filenames.DataDisk)
+		args = append(args, "-s", fmt.Sprintf("%d,virtio-blk,%s", slot, dataDisk))
+		slot++
 	}
 
 	// Console and boot ROM. The two differ between amd64 (-l / LPC) and arm64
