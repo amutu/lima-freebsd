@@ -438,10 +438,6 @@ gmake generate               # 生成 protobuf/mock 等
 
 注意：
 
-- `go test` 如果遇到 `/tmp` 的 `permission denied`，先设置：
-  ```bash
-  export TMPDIR=$HOME/.gotmp GOTMPDIR=$HOME/.gotmp
-  ```
 - 新 Go/shell/Makefile 文件需要 SPDX 头；提交需要 `git commit -s`（DCO）
 - 更多开发约定见 `AGENTS.md` 和 `website/content/en/docs/community/contributing.md`
 
