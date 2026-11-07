@@ -16,6 +16,7 @@ See the following flowchart to choose the best vmType for you:
 flowchart
   host{"Host OS"} -- "Windows" --> wsl2["WSL2"]
   host -- "Linux" --> qemu["QEMU"]
+  host -- "FreeBSD" --> bhyve["bhyve"]
   host -- "macOS" --> intel_on_arm{"Need to run <br> Intel binaries <br> on ARM?"}
   intel_on_arm -- "Yes" --> just_elf{"Just need to <br> run Intel userspace (fast), <br> or entire Intel VM (slow)?"}
   just_elf -- "Userspace (fast)" --> vz
@@ -26,3 +27,5 @@ flowchart
 The default vmType is QEMU in Lima prior to v1.0.
 Starting with Lima v1.0, Lima will use VZ by default on macOS (>= 13.5) for new instances,
 unless the config is incompatible with VZ. (e.g., non-native arch is specified)
+On FreeBSD, Lima uses bhyve by default for native-architecture guests, since QEMU there
+has no hardware acceleration.

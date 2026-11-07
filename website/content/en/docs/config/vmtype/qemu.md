@@ -19,6 +19,11 @@ reverse-sshfs, because QEMU for Windows has no 9p support. Pinning
 also requires `sftp-server.exe`, which comes from the optional OpenSSH Server
 feature.
 
+On non-Windows hosts the default mount type is `9p`; on Windows it is
+`reverse-sshfs`. On FreeBSD, `9p` requires a QEMU build with `virtfs` (recent
+`emulators/qemu` packages enable it); pin `mountType: reverse-sshfs` if your
+build lacks it.
+
 An example configuration:
 {{< tabpane text=true >}}
 {{% tab header="CLI" %}}

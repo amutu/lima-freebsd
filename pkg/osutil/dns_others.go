@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !freebsd
 
 // SPDX-FileCopyrightText: Copyright The Lima Authors
 // SPDX-License-Identifier: Apache-2.0

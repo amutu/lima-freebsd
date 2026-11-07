@@ -327,6 +327,73 @@ func TestTemplateNICRename(t *testing.T) {
 	}
 }
 
+func TestTemplateUserDataLockPasswd(t *testing.T) {
+	for _, tc := range []struct {
+		os     limatype.OS
+		locked bool
+	}{
+		{os: limatype.LINUX, locked: true},
+		// FreeBSD sshd(8) refuses every authentication method, public keys
+		// included, for accounts whose password field starts with `*LOCKED*`,
+		// which is what `pw lock` (nuageinit's `lock_passwd`) sets.
+		{os: limatype.FREEBSD, locked: false},
+	} {
+		t.Run(string(tc.os), func(t *testing.T) {
+			args := &TemplateArgs{
+				Name:             "default",
+				User:             "foo",
+				UID:              501,
+				Home:             "/home/foo.guest",
+				Shell:            "/bin/sh",
+				SSHPubKeys:       []string{"ssh-rsa dummy foo@example.com"},
+				MountType:        "reverse-sshfs",
+				OS:               tc.os,
+				PasswordlessSudo: true,
+			}
+			config, err := ExecuteTemplateCloudConfig(args)
+			assert.NilError(t, err)
+			assert.Equal(t, strings.Contains(string(config), "lock_passwd:"), tc.locked)
+			// `*` keeps password logins disabled without locking the account.
+			assert.Equal(t, strings.Contains(string(config), `passwd: "*"`), tc.os == limatype.FREEBSD)
+		})
+	}
+}
+
+func TestTemplateBhyveNetworkConfig(t *testing.T) {
+	args := &TemplateArgs{
+		Name:           "default",
+		User:           "foo",
+		UID:            501,
+		Home:           "/home/foo.guest",
+		Shell:          "/bin/sh",
+		SSHPubKeys:     []string{"ssh-rsa dummy foo@example.com"},
+		MountType:      "9p",
+		OS:             limatype.FREEBSD,
+		VMType:         limatype.BHYVE,
+		SlirpNICName:   "eth0",
+		SlirpGateway:   "10.0.2.2",
+		SlirpIPAddress: "10.0.2.15",
+		SlirpPrefixLen: 24,
+		DNSAddresses:   []string{"1.1.1.1"},
+		Networks: []Network{
+			{MACAddress: "52:55:55:12:34:56", Interface: "eth0", Metric: 200},
+		},
+	}
+	layout, err := ExecuteTemplateCIDataISO(args)
+	assert.NilError(t, err)
+	files := make(map[string]string)
+	for _, f := range layout {
+		b, err := io.ReadAll(f.Reader)
+		assert.NilError(t, err)
+		files[f.Path] = string(b)
+	}
+	networkConfig := files["network-config"]
+	// nuageinit only honors `gateway4` for the IPv4 default route.
+	assert.Assert(t, strings.Contains(networkConfig, "gateway4: 10.0.2.2"))
+	assert.Assert(t, !strings.Contains(networkConfig, "routes:"))
+	assert.Assert(t, strings.Contains(networkConfig, "'10.0.2.15/24'"))
+}
+
 func TestTemplateSSHOverVsock(t *testing.T) {
 	for _, tc := range []struct {
 		vmType    string
