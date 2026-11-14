@@ -11,7 +11,7 @@ require (
 	golang.org/x/crypto v0.58.0 // gomodjail:unconfined
 	golang.org/x/image v0.47.0
 	golang.org/x/net v0.62.0 // gomodjail:unconfined
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	golang.org/x/sys v0.49.0 // gomodjail:unconfined
 	golang.org/x/text v0.43.0
 )
@@ -24,7 +24,7 @@ require (
 	github.com/Microsoft/hcsshim v0.15.0
 	github.com/apparentlymart/go-cidr v1.1.1
 	github.com/balajiv113/fd v0.0.0-20230330094840-143eec500f3e // gomodjail:unconfined
-	github.com/cheggaaa/pb/v3 v3.2.1 // gomodjail:unconfined
+	github.com/cheggaaa/pb/v3 v3.3.0 // gomodjail:unconfined
 	github.com/cilium/ebpf v0.22.0 // gomodjail:unconfined
 	github.com/containerd/continuity v0.5.0 // gomodjail:unconfined
 	github.com/containers/gvisor-tap-vsock v0.9.0 // gomodjail:unconfined
@@ -121,8 +121,8 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	// gomodjail:unconfined
 	github.com/magiconair/properties v1.18.12 // indirect
-	github.com/mattn/go-colorable v0.1.15 // indirect
-	github.com/mattn/go-runewidth v0.0.27 // indirect
+	github.com/mattn/go-colorable v0.1.16 // indirect
+	github.com/mattn/go-runewidth v0.0.31 // indirect
 	// gomodjail:unconfined
 	github.com/mdlayher/socket v0.8.0 // indirect
 	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b // indirect
