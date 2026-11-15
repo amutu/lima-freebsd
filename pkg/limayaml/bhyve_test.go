@@ -29,9 +29,9 @@ func TestBhyveNetworkConfigDefaults(t *testing.T) {
 	assert.Equal(t, cfg.PrefixLen, 24)
 	assert.Assert(t, cfg.Network.Contains(cfg.Address))
 	assert.Assert(t, !cfg.Address.Equal(cfg.Gateway))
-	if last := cfg.Address.To4()[3]; last < defaultBhyveIPFirst || last > defaultBhyveIPLast {
-		t.Fatalf("derived address %q is outside the default range", cfg.Address)
-	}
+	last := cfg.Address.To4()[3]
+	assert.Assert(t, last >= defaultBhyveIPFirst && last <= defaultBhyveIPLast,
+		"derived address %q is outside the default range", cfg.Address)
 
 	again, err := ResolveBhyveNetwork("/home/user/.lima/default", &limatype.LimaYAML{})
 	assert.NilError(t, err)

@@ -55,7 +55,7 @@ func CheckICMPForwarding() error {
 	}
 	if errors.Is(dgramErr, unix.EPROTONOSUPPORT) && errors.Is(rawErr, unix.EPERM) {
 		return fmt.Errorf("the host does not provide unprivileged ICMP sockets "+
-			"(SOCK_DGRAM/IPPROTO_ICMP: %v; SOCK_RAW/IPPROTO_ICMP: %v)", dgramErr, rawErr)
+			"(SOCK_DGRAM/IPPROTO_ICMP: %w; SOCK_RAW/IPPROTO_ICMP: %w)", dgramErr, rawErr)
 	}
-	return fmt.Errorf("no usable ICMP socket (SOCK_DGRAM: %v; SOCK_RAW: %v)", dgramErr, rawErr)
+	return fmt.Errorf("no usable ICMP socket (SOCK_DGRAM: %w; SOCK_RAW: %w)", dgramErr, rawErr)
 }

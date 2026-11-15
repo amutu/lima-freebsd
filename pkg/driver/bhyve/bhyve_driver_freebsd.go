@@ -213,6 +213,19 @@ func (l *LimaBhyveDriver) Start(ctx context.Context) (chan error, error) {
 	return waitCh, nil
 }
 
+// interpretExit maps the exit status of a bhyve process to an error meaningful
+// to Lima.
+func interpretExit(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+	return interpretExitCode(exitErr.ExitCode())
+}
+
 // exitError maps the bhyve exit status to an error, appending the tail of the
 // serial log when bhyve itself failed, so that the reason is visible in the
 // host agent log instead of being buried in serial.log.

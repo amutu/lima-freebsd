@@ -338,7 +338,7 @@ func TestTemplateUserDataLockPasswd(t *testing.T) {
 		// which is what `pw lock` (nuageinit's `lock_passwd`) sets.
 		{os: limatype.FREEBSD, locked: false},
 	} {
-		t.Run(string(tc.os), func(t *testing.T) {
+		t.Run(tc.os, func(t *testing.T) {
 			args := &TemplateArgs{
 				Name:             "default",
 				User:             "foo",

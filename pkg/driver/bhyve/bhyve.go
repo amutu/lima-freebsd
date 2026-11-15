@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -136,7 +135,7 @@ func shortHash(s string, n int) string {
 	const offset64 = 14695981039346656037
 	const prime64 = 1099511628211
 	var h uint64 = offset64
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		h ^= uint64(s[i])
 		h *= prime64
 	}
@@ -151,7 +150,7 @@ func shortHash(s string, n int) string {
 }
 
 // Cmdline returns the bhyve executable and its arguments.
-func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
+func Cmdline(cfg Config, goos, goarch string) (exe string, args []string, err error) {
 	if cfg.LimaYAML == nil {
 		return "", nil, errors.New("nil LimaYAML")
 	}
@@ -184,8 +183,6 @@ func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
 	}
 
 	vmName := VMName(cfg.Name, cfg.InstanceDir)
-
-	var args []string
 
 	// amd64-only flags. arm64's bhyve rejects -A/-H/-P ("illegal option").
 	if goarch == "amd64" {
@@ -305,7 +302,7 @@ func Cmdline(cfg Config, goos string, goarch string) (string, []string, error) {
 
 	args = append(args, vmName)
 
-	exe := "/usr/sbin/bhyve"
+	exe = "/usr/sbin/bhyve"
 	if goos != "freebsd" {
 		// Only reached from unit tests; keeps the builder honest about its host.
 		exe = "bhyve"
@@ -386,19 +383,6 @@ func nativeArchName(goarch string) limatype.Arch {
 		return limatype.X8664
 	}
 	return limatype.AARCH64
-}
-
-// interpretExit maps the exit status of a bhyve process to an error meaningful
-// to Lima.
-func interpretExit(err error) error {
-	if err == nil {
-		return nil
-	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		return err
-	}
-	return interpretExitCode(exitErr.ExitCode())
 }
 
 // interpretExitCode maps bhyve's documented exit codes.

@@ -182,7 +182,7 @@ func deriveBhyveAddress(ipnet *net.IPNet, gateway net.IP, instDir string) net.IP
 	offset := start + uint64(h.Sum32())%count
 
 	base := binary.BigEndian.Uint32(ipnet.IP.To4())
-	for i := uint64(0); i < count; i++ {
+	for range count {
 		candidate := make(net.IP, net.IPv4len)
 		binary.BigEndian.PutUint32(candidate, base+uint32(offset))
 		if !candidate.Equal(gateway) {
@@ -233,7 +233,7 @@ func freebsdVersionAtLeast(v string, wantMajor, wantMinor int) bool {
 	return major > wantMajor || (major == wantMajor && minor >= wantMinor)
 }
 
-func parseMajorMinor(v string) (int, int, bool) {
+func parseMajorMinor(v string) (major, minor int, ok bool) {
 	parts := strings.SplitN(strings.TrimSpace(v), ".", 3)
 	if len(parts) < 2 {
 		return 0, 0, false
@@ -250,7 +250,7 @@ func parseMajorMinor(v string) (int, int, bool) {
 	if end == 0 {
 		return 0, 0, false
 	}
-	minor, err := strconv.Atoi(minorStr[:end])
+	minor, err = strconv.Atoi(minorStr[:end])
 	if err != nil {
 		return 0, 0, false
 	}
