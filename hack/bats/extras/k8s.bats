@@ -101,8 +101,13 @@ k() {
     # https://github.com/kubernetes/kubernetes/issues/134732
     k expose deployment coredns --port=53 --type=NodePort \
         --overrides='{"spec":{"ports":[{"port":53,"protocol":"UDP","targetPort":53,"nodePort":32053}]}}'
-    run dig @127.0.0.1 -p 32053 lima-vm.io
-    assert_success
+    # The guestagent polls for new guest ports every few seconds, so the host port may
+    # not be forwarded yet. Unlike curl, dig does not retry after an ICMP port-unreachable.
+    local deadline=$((SECONDS + 30))
+    until dig +time=2 +tries=1 @127.0.0.1 -p 32053 lima-vm.io; do
+        ((SECONDS < deadline)) || fail "timed out waiting for the UDP port forwarder"
+        sleep 1
+    done
 
     # Cleanup
     for svc in "${services[@]}"; do
