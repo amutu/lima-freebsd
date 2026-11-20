@@ -8,12 +8,12 @@ go 1.26.8
 require (
 	github.com/lima-vm/go-qcow2reader v0.8.0 // gomodjail:unconfined
 	github.com/lima-vm/sshocker v0.3.11 // gomodjail:unconfined
-	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // gomodjail:unconfined
-	golang.org/x/image v0.47.0
+	golang.org/x/crypto v0.59.0 // gomodjail:unconfined
+	golang.org/x/image v0.48.0
 	golang.org/x/net v0.62.0 // gomodjail:unconfined
 	golang.org/x/sync v0.25.0
 	golang.org/x/sys v0.50.0 // gomodjail:unconfined
-	golang.org/x/text v0.43.0
+	golang.org/x/text v0.44.0
 )
 
 require (
@@ -41,13 +41,13 @@ require (
 	github.com/google/yamlfmt v0.21.0 // gomodjail:unconfined
 	github.com/inetaf/tcpproxy v0.0.0-20260515195445-c159a6051109 // gomodjail:unconfined
 	github.com/invopop/jsonschema v0.14.0 // gomodjail:unconfined
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.4
 	github.com/mattn/go-isatty v0.0.24 // gomodjail:unconfined
 	github.com/mattn/go-shellwords v1.0.16 // gomodjail:unconfined
 	github.com/mdlayher/netlink v1.11.2 // gomodjail:unconfined
 	github.com/mdlayher/vsock v1.4.0 // gomodjail:unconfined
 	github.com/miekg/dns v1.1.73 // gomodjail:unconfined
-	github.com/mikefarah/yq/v4 v4.54.2 // gomodjail:unconfined
+	github.com/mikefarah/yq/v4 v4.54.3 // gomodjail:unconfined
 	github.com/modelcontextprotocol/go-sdk v1.8.0 // gomodjail:unconfined
 	github.com/nxadm/tail v1.4.11 // gomodjail:unconfined
 	github.com/opencontainers/go-digest v1.0.0
@@ -74,9 +74,9 @@ require (
 	// gomodjail:unconfined
 	golang.org/x/oauth2 v0.36.0 // indirect
 	// gomodjail:unconfined
-	golang.org/x/term v0.47.0 // indirect
+	golang.org/x/term v0.48.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 )
 
 require (
